@@ -6,6 +6,7 @@ import time
 import os
 import cv2
 import torch
+import logging
 from typing import List, Optional, Tuple, Union
 from weights import WeightsDownloadCache
 import numpy as np
@@ -28,17 +29,19 @@ from diffusers.pipelines.stable_diffusion.safety_checker import (
 )
 from diffusers.utils import load_image
 from transformers import DPTFeatureExtractor, DPTForDepthEstimation
-from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
+from transformers import CLIPVisionModelWithProjection
 from dataset_and_utils import TokenEmbeddingsHandler
 
-CONTROL_DEPTH_CACHE = "./control-depth-cache"
-CONTROL_CANNY_CACHE = "./control-canny-cache"
-SDXL_MODEL_CACHE = "./sdxl-cache"
-SAFETY_CACHE = "./safety-cache"
-FEATURE_CACHE = "./feature-cache"
-FEATURE_EXTRACTOR = "./feature-extractor"
-SDXL_URL = "https://weights.replicate.delivery/default/sdxl/sdxl-vae-upcast-fix.tar"
-SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
+logging.basicConfig(level=logging.INFO)
+
+
+CONTROL_DEPTH_CACHE="control-depth-cache"
+CONTROL_CANNY_CACHE="control-canny-cache"
+SDXL_MODEL_CACHE="sdxl-cache"
+SAFETY_CACHE="safety-cache"
+FEATURE_CACHE="feature-cache"
+FEATURE_EXTRACTOR="feature-extractor"
+CLIP_CACHE="clip-cache"
 
 class KarrasDPM:
     def from_config(config):
@@ -55,18 +58,11 @@ SCHEDULERS = {
     "PNDM": PNDMScheduler,
 }
 
-def download_weights(url, dest):
-    start = time.time()
-    print("downloading url: ", url)
-    print("downloading to: ", dest)
-    subprocess.check_call(["pget", "-x", url, dest], close_fds=False)
-    print("downloading took: ", time.time() - start)
-
 
 class Predictor(BasePredictor):
 
     def load_lora(self, weights, pipe, scale):
-        print("Loading Unet LoRA")
+        logging.info("Loading Unet LoRA")
         self.is_lora = True
         weights = str(weights)
         self.tuned_weights = weights
@@ -101,19 +97,13 @@ class Predictor(BasePredictor):
 
         self.weights_cache = WeightsDownloadCache()
 
-        print("Loading safety checker...")
-        if not os.path.exists(SAFETY_CACHE):
-            download_weights(SAFETY_URL, SAFETY_CACHE)
+        logging.info("Loading safety checker...")
         self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(
             SAFETY_CACHE, torch_dtype=torch.float16
         ).to("cuda")
-        self.feature_extractor = CLIPImageProcessor.from_pretrained(FEATURE_EXTRACTOR)
-
-        if not os.path.exists(SDXL_MODEL_CACHE):
-            download_weights(SDXL_URL, SDXL_MODEL_CACHE)
 
         self.depth_estimator = DPTForDepthEstimation.from_pretrained(FEATURE_CACHE).to("cuda")
-        self.feature_extractor = DPTFeatureExtractor.from_pretrained(FEATURE_CACHE)
+        self.feature_extractor = DPTFeatureExtractor.from_pretrained(FEATURE_EXTRACTOR)
 
         controlnet = [
             ControlNetModel.from_pretrained(
@@ -126,33 +116,33 @@ class Predictor(BasePredictor):
             )
         ]
 
-        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-            "h94/IP-Adapter",
-            subfolder="models/image_encoder",
+        self.image_estimator = CLIPVisionModelWithProjection.from_pretrained(
+            CLIP_CACHE,
             torch_dtype=torch.float16
         )
 
-        print("Loading SDXL Controlnet pipeline...")
+        logging.info("Loading SDXL Controlnet pipeline...")
 
         self.control_img2img_pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
             SDXL_MODEL_CACHE,
             controlnet=controlnet,
-            image_encoder=self.image_encoder,
+            image_encoder=self.image_estimator,
             torch_dtype=torch.float16,
             use_safetensors=True,
             variant="fp16",
         )
         self.control_img2img_pipe.to("cuda")
         
-        self.control_img2img_pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors")
+        self.control_img2img_pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter-plus_sdxl_vit-h.safetensors")
 
         self.is_lora = False
         if weights or os.path.exists("./trained-model"):
             self.load_lora(weights, self.control_img2img_pipe)
 
-        print("setup took: ", time.time() - start)
+        logging.info("setup took: ", time.time() - start)
 
-    def load_image(self, path, color="#A2A2A2", resizing=1):
+    @staticmethod
+    def load_image(path, color="#A2A2A2", resizing=1):
         shutil.copyfile(path, "/tmp/image.png")
         img = Image.open("/tmp/image.png")
         original_size = img.size
@@ -167,16 +157,17 @@ class Predictor(BasePredictor):
             background.paste(img, position)
             img = background
         return img
-        
+    
     def resize_image(self, image):
         image_width, image_height = image.size
-        print("Original width:"+str(image_width)+", height:"+str(image_height))
+        logging.info("Original width:"+str(image_width)+", height:"+str(image_height))
         new_width, new_height = self.resize_to_allowed_dimensions(image_width, image_height)
-        print("new_width:"+str(new_width)+", new_height:"+str(new_height))
+        logging.info("new_width:"+str(new_width)+", new_height:"+str(new_height))
         image = image.resize((new_width, new_height))
         return image, new_width, new_height
     
-    def resize_to_allowed_dimensions(self, width, height):
+    @staticmethod   
+    def resize_to_allowed_dimensions(width, height):
         """
         Function re-used from Lucataco's implementation of SDXL-Controlnet for Replicate
         """
@@ -195,14 +186,13 @@ class Predictor(BasePredictor):
         ]
         # Calculate the aspect ratio
         aspect_ratio = width / height
-        print(f"Aspect Ratio: {aspect_ratio:.2f}")
+        logging.info(f"Aspect Ratio: {aspect_ratio:.2f}")
         # Find the closest allowed dimensions that maintain the aspect ratio
         closest_dimensions = min(
             allowed_dimensions,
             key=lambda dim: abs(dim[0] / dim[1] - aspect_ratio)
         )
         return closest_dimensions
-
     def get_depth_map(self, image):
         image = self.feature_extractor(images=image, return_tensors="pt").pixel_values.to("cuda")
         with torch.no_grad(), torch.autocast("cuda"):
@@ -223,8 +213,8 @@ class Predictor(BasePredictor):
         image = image.permute(0, 2, 3, 1).cpu().numpy()[0]
         image = Image.fromarray((image * 255.0).clip(0, 255).astype(np.uint8))
         return image
-
-    def image2canny(self, image):
+    @staticmethod   
+    def image2canny(image):
         image = np.array(image)
         image = cv2.Canny(image, 100, 200)
         image = image[:, :, None]
@@ -239,6 +229,10 @@ class Predictor(BasePredictor):
             default="An astronaut riding a rainbow unicorn",
         ),
         image: Path = Input(
+            description="Input image",
+            default=None,
+        ),
+        ip_image: Path = Input(
             description="Input image for img2img or inpaint mode",
             default=None,
         ),
@@ -318,7 +312,7 @@ class Predictor(BasePredictor):
         """Run a single prediction on the model"""
         if seed is None:
             seed = int.from_bytes(os.urandom(2), "big")
-        print(f"Using seed: {seed}")
+        logging.info(f"Using seed: {seed}")
         
         pipe = self.control_img2img_pipe
         # Sometimes loras are not properly unloaded at the end of the execution, try again here.
@@ -338,13 +332,14 @@ class Predictor(BasePredictor):
             # consistency with fine-tuning API
             for k, v in self.token_map.items():
                 prompt = prompt.replace(k, v)
-        print(f"Prompt: {prompt}")
+        logging.info(f"Prompt: {prompt}")
         image = self.load_image(image, background_color, resizing_scale)
+        ip_image = self.load_image(ip_image, background_color, resizing_scale)
         resized_image, width, height = self.resize_image(image)
 
         sdxl_kwargs["image"] = resized_image
         sdxl_kwargs["control_image"] = [self.get_depth_map(image), self.image2canny(image)]
-        sdxl_kwargs["ip_adapter_image"] = image
+        sdxl_kwargs["ip_adapter_image"] = ip_image
         sdxl_kwargs["strength"] = strength
         sdxl_kwargs["controlnet_conditioning_scale"] = [condition_depth_scale, condition_canny_scale]
         sdxl_kwargs["width"] = width
