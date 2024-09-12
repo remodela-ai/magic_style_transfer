@@ -19,12 +19,12 @@ This project combines Stable Diffusion XL (SDXL) with IP-Adapter to enhance imag
 ## Requirements
 
 - NVIDIA GPU with CUDA support
-- Python 3.9 or later
+- Python 3.9
 - Docker (optional, for easier environment setup)
 
 ## Installation
 
 ### Clone the repository
 ```bash
-git clone https://github.com/<your-repo>/recognize-anything.git
-cd recognize-anything
+git clone https://github.com/remodela-ai/magic_style_transfer
+cd magic_style_transfer
