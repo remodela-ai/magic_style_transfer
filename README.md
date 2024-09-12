@@ -4,18 +4,27 @@
 
 This is an implementation of Stability AI's [SDXL](https://github.com/Stability-AI/generative-models) as a [Cog](https://github.com/replicate/cog) model with ControlNet and Replicate's LoRA support.
 
-## Basic Usage
 
-For prediction:
+This project combines Stable Diffusion XL (SDXL) with IP-Adapter to enhance image generation by allowing control over various visual styles using depth maps and canny edges. The models used include LoRA weights, IP-Adapter, and additional ControlNet functionality for depth and canny conditioning.
 
+## Features
+
+- **IP-Adapter Integration**: Generate detailed, controllable outputs using IP-Adapter combined with SDXL.
+- **ControlNet Models**: Support for depth and canny edge conditioning for more structured image generation.
+- **LoRA Fine-tuning**: Ability to load and unload LoRA weights for fine-tuning with different prompts and outputs.
+- **Depth Map & Canny Edge Detection**: Automatically extracts and processes depth maps and canny edges from input images to enhance the conditioning of ControlNet.
+- **Custom Schedulers**: Supports various schedulers including DDIM, DPMSolverMultistep, HeunDiscrete, and more.
+- **Multiple Outputs**: Generate up to four images at a time, with control over inference steps, guidance scale, and other parameters.
+
+## Requirements
+
+- NVIDIA GPU with CUDA support
+- Python 3.9 or later
+- Docker (optional, for easier environment setup)
+
+## Installation
+
+### Clone the repository
 ```bash
-cog predict -i prompt="shot in the style of sksfer, ..." -i image=@image.png -i lora_weights="https://pbxt.replicate.delivery/mwN3AFyYZyouOB03Uhw8ubKW9rpqMgdtL9zYV9GF2WGDiwbE/trained_model.tar"
-```
-You may need to increase the default `lora_scale` value to big values such as <strong>0.8 ... 0.95</strong>.
-
-## Limitations
-- `lora_weights` only accepts models trained in Replicate and is a mandatory parameter.
-- `expert_ensemble_refiner` is currently not supported, you can use `base_image_refiner` instead.
-
-<br>
-<strong>For further improvements of this project, feel free to fork and PR!</strong>
+git clone https://github.com/<your-repo>/recognize-anything.git
+cd recognize-anything
